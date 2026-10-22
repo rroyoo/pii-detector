@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/rroyoo/pii-detector/sidecar/internal/metrics"
 	"github.com/rroyoo/pii-detector/sidecar/internal/otlp"
@@ -18,9 +19,21 @@ func env(k, d string) string {
 	return d
 }
 
+func envFloat(k string, d float64) float64 {
+	v := os.Getenv(k)
+	if v == "" {
+		return d
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 || f > 1 {
+		log.Fatalf("%s must be a number between 0 and 1", k)
+	}
+	return f
+}
+
 func main() {
 	m := metrics.New()
-	analyzer := presidio.NewClient(env("PRESIDIO_URL", "http://localhost:5002"), env("PRESIDIO_LANGUAGE", "en"))
+	analyzer := presidio.NewClient(env("PRESIDIO_URL", "http://localhost:3000"), env("PRESIDIO_LANGUAGE", "en"), envFloat("PRESIDIO_MIN_SCORE", 0.4))
 	recv := otlp.NewReceiver(pipeline.New(analyzer, m))
 
 	go func() {
