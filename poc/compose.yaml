@@ -1,0 +1,31 @@
+services:
+  analyzer:
+    build:
+      context: ../analyzer
+    restart: unless-stopped
+
+  sidecar:
+    build:
+      context: ../sidecar
+    environment:
+      PRESIDIO_URL: http://analyzer:3000
+      PRESIDIO_LANGUAGE: es
+      PRESIDIO_MIN_SCORE: "0.4"
+    depends_on:
+      analyzer:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:9464:9464"
+
+  app:
+    build:
+      context: ..
+      dockerfile: poc/Dockerfile
+    environment:
+      PII_SIDECAR_URL: http://sidecar:4318/v1/logs
+      OTEL_SERVICE_NAME: pii-poc-app
+    depends_on:
+      - sidecar
+    ports:
+      - "127.0.0.1:8080:8080"
