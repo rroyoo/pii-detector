@@ -2,14 +2,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: mockjdbc-spring-users
+  name: my-app
 spec:
   containers:
     - name: app
-      image: mockjdbc-spring-users:latest
+      image: my-app:latest
       env:
         - { name: JAVA_TOOL_OPTIONS, value: "-javaagent:/opt/pii/pii-detector-agent.jar" }
-        - { name: OTEL_SERVICE_NAME, value: mockjdbc-spring-users }
+        - { name: OTEL_SERVICE_NAME, value: my-app }
         - { name: PII_SIDECAR_URL, value: "http://localhost:4318/v1/logs" }
     - name: pii-sidecar
       image: pii-sidecar:latest

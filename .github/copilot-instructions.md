@@ -19,7 +19,7 @@ The intended flow is application → Java instrumentation agent (`agent/`) → O
 
 In the sidecar, `cmd/sidecar` wires the components together; `internal/otlp` accepts `POST /v1/logs` and extracts the service name and string log bodies; `internal/pipeline` passes each body to the analyzer and records counts; `internal/presidio` adapts the Presidio `/analyze` API; `internal/metrics` serves `/metrics` on a separate listener. Presidio defaults to `http://localhost:3000`; `PRESIDIO_URL`, `PRESIDIO_LANGUAGE`, `PRESIDIO_MIN_SCORE` (default `0.4`, sent to Presidio as `score_threshold`), `OTLP_HTTP_ADDR`, and `METRICS_ADDR` configure the sidecar. The stock Presidio image only has English models; `analyzer/` builds an image with English and Spanish models and recognizers (`ES_NIF`, `ES_NIE`), used by the PoC with `PRESIDIO_LANGUAGE=es`. The agent endpoint is configured with `PII_SIDECAR_URL`; service name comes from `otel.service.name`, then `OTEL_SERVICE_NAME`.
 
-The integration target described in `README.md` is `../mockjdbc-foundation/mockjdbc-spring-users` (Spring Boot 3.5, Java 17, Maven).
+The reference demo application is `poc/` (Spring Boot 3.5, Java 17, Maven), which runs with the agent through `poc/compose.yaml`.
 
 ## Conventions
 
