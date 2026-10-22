@@ -8,16 +8,18 @@ This repository detects possible PII in application logs for GDPR analysis. It i
 
 - Sidecar build and tests: `cd sidecar && go build ./... && go test ./...`
 - One Go test: `cd sidecar && go test ./internal/pipeline -run '^TestName$'`
-- Build the Java agent: `cd agent && mvn package`
+- Build the Java agent: `cd agent && mvn package` (produces a shaded, executable `-javaagent` JAR)
 - One Java test: `cd agent && mvn test -Dtest=ClassName#method`
+- Build the structured-log demo: `cd poc && mvn test`
+- Run the demo stack: `cd poc && docker compose up --build -d`
 
 ## Architecture
 
-The intended flow is application → Java instrumentation agent (`agent/`) → OTLP/HTTP JSON → Go sidecar (`sidecar/`) → Presidio Analyzer → Prometheus metrics. The example deployment in `deploy/pod-example.yaml` puts the app and sidecar in one pod and connects them over localhost.
+The intended flow is application → Java instrumentation agent (`agent/`) → OTLP/HTTP JSON → Go sidecar (`sidecar/`) → Presidio Analyzer → Prometheus metrics. The agent instruments Logback and exports the formatted message plus structured key-value fields asynchronously. The demo in `poc/` uses this agent; its controller only writes an application log and does not call the sidecar directly. The example deployment in `deploy/pod-example.yaml` places the app, sidecar, and Presidio Analyzer in one pod and connects them over localhost.
 
-In the sidecar, `cmd/sidecar` wires the components together; `internal/otlp` accepts `POST /v1/logs` and extracts the service name and string log bodies; `internal/pipeline` passes each body to the analyzer and records counts; `internal/presidio` adapts the Presidio `/analyze` API; `internal/metrics` serves `/metrics` on a separate listener. Presidio defaults to `http://localhost:5002`; `PRESIDIO_URL`, `PRESIDIO_LANGUAGE`, `OTLP_HTTP_ADDR`, and `METRICS_ADDR` configure the sidecar. The agent endpoint is configured with `PII_SIDECAR_URL`; service name comes from `otel.service.name`, then `OTEL_SERVICE_NAME`.
+In the sidecar, `cmd/sidecar` wires the components together; `internal/otlp` accepts `POST /v1/logs` and extracts the service name and string log bodies; `internal/pipeline` passes each body to the analyzer and records counts; `internal/presidio` adapts the Presidio `/analyze` API; `internal/metrics` serves `/metrics` on a separate listener. Presidio defaults to `http://localhost:3000`; `PRESIDIO_URL`, `PRESIDIO_LANGUAGE`, `PRESIDIO_MIN_SCORE` (default `0.4`, sent to Presidio as `score_threshold`), `OTLP_HTTP_ADDR`, and `METRICS_ADDR` configure the sidecar. The stock Presidio image only has English models; `analyzer/` builds an image with English and Spanish models and recognizers (`ES_NIF`, `ES_NIE`), used by the PoC with `PRESIDIO_LANGUAGE=es`. The agent endpoint is configured with `PII_SIDECAR_URL`; service name comes from `otel.service.name`, then `OTEL_SERVICE_NAME`.
 
-The agent entry point and exporter exist, but `LogCapture.install` is currently an empty scaffold, so the logging hook is not implemented yet. The integration target described in `README.md` is `../mockjdbc-foundation/mockjdbc-spring-users` (Spring Boot 3.5, Java 17, Maven).
+The integration target described in `README.md` is `../mockjdbc-foundation/mockjdbc-spring-users` (Spring Boot 3.5, Java 17, Maven).
 
 ## Conventions
 

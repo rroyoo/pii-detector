@@ -13,6 +13,13 @@ spec:
         - { name: PII_SIDECAR_URL, value: "http://localhost:4318/v1/logs" }
     - name: pii-sidecar
       image: pii-sidecar:latest
+      env:
+        - { name: PRESIDIO_URL, value: "http://localhost:3000" }
+        - { name: PRESIDIO_MIN_SCORE, value: "0.4" }
       ports:
         - { name: otlp, containerPort: 4318 }
         - { name: metrics, containerPort: 9464 }
+    - name: presidio-analyzer
+      image: mcr.microsoft.com/presidio-analyzer:latest
+      ports:
+        - { name: analyzer, containerPort: 3000 }
