@@ -15,6 +15,7 @@ services:
       analyzer:
         condition: service_healthy
     ports:
+      - "127.0.0.1:4317:4317"
       - "127.0.0.1:4318:4318"
       - "127.0.0.1:9464:9464"
 
@@ -22,8 +23,12 @@ services:
     build:
       context: ..
       dockerfile: poc/Dockerfile
+      args:
+        AGENT_FLAVOR: ${PII_EXPORT_PROTOCOL:-http}
     environment:
+      PII_EXPORT_PROTOCOL: ${PII_EXPORT_PROTOCOL:-http}
       PII_SIDECAR_URL: http://sidecar:4318/v1/logs
+      PII_SIDECAR_GRPC_ADDR: sidecar:4317
       OTEL_SERVICE_NAME: pii-poc-app
     depends_on:
       - sidecar

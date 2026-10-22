@@ -10,13 +10,16 @@ spec:
       env:
         - { name: JAVA_TOOL_OPTIONS, value: "-javaagent:/opt/pii/pii-detector-agent.jar" }
         - { name: OTEL_SERVICE_NAME, value: my-app }
+        - { name: PII_EXPORT_PROTOCOL, value: "http" }   # or "grpc" with PII_SIDECAR_GRPC_ADDR
         - { name: PII_SIDECAR_URL, value: "http://localhost:4318/v1/logs" }
+        - { name: PII_SIDECAR_GRPC_ADDR, value: "localhost:4317" }
     - name: pii-sidecar
       image: pii-sidecar:latest
       env:
         - { name: PRESIDIO_URL, value: "http://localhost:3000" }
         - { name: PRESIDIO_MIN_SCORE, value: "0.4" }
       ports:
+        - { name: otlp-grpc, containerPort: 4317 }
         - { name: otlp, containerPort: 4318 }
         - { name: metrics, containerPort: 9464 }
     - name: presidio-analyzer
