@@ -64,10 +64,8 @@ java -javaagent:/path/to/pii-detector-agent-http-1.0.0-SNAPSHOT-agent.jar -jar y
 
 In the PoC, `PII_EXPORT_PROTOCOL=grpc docker compose up -d --build` builds the gRPC flavor (`AGENT_FLAVOR` build arg).
 
-Benchmark (loopback, fake Presidio, 20k messages): at 1000 msg/s both deliver 100%; at 5000 msg/s gRPC delivered 100% versus
-~45% for HTTP (the agent drops when the queue is full, by design). Per-call latency is microseconds in both; with real
-Presidio (~30 ms per analysis) the transport is not the bottleneck, so HTTP is the sensible default. Dependency scan (OSV):
-no known vulnerabilities in the agent's 26 artifacts.
+See [Performance](#performance) for the HTTP vs gRPC comparison. Dependency scan (OSV): no known
+vulnerabilities in the agent's 26 artifacts.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -197,6 +195,36 @@ is verified manually with the PoC steps above.
 
 To run a single test: `go test ./internal/presidio -run TestName` or
 `mvn test -Dtest=ClassName#method`.
+
+## Performance
+
+HTTP vs gRPC between the agent and the sidecar, measured with a micro-benchmark that calls the exporter directly.
+
+**Setup:** everything on loopback, sidecar built from this repo, Presidio replaced by a stub that returns `[]` instantly
+(so only the transport and the sidecar pipeline are measured), `PRESIDIO_MIN_SCORE=0`. Messages are short log lines.
+"call" is the latency seen by the application thread when it hands a log to the exporter; "delivered" is the share of
+messages the sidecar actually analyzed (read from `pii_logs_analyzed_total`).
+
+| Scenario | Protocol | call p50 | call p99 | Delivered | Throughput |
+|---|---|---|---|---|---|
+| 1,000 msg/s, 5k msgs | HTTP | 53 µs | 1.4 ms | 100% | 1,000 msg/s |
+| 1,000 msg/s, 5k msgs | gRPC | 142 µs | 0.6 ms | 100% | 999 msg/s |
+| 5,000 msg/s, 20k msgs | HTTP | 41 µs | 3.4 ms | 45.5% | 467 msg/s |
+| 5,000 msg/s, 20k msgs | gRPC | 65 µs | 0.9 ms | 100% | 4,688 msg/s |
+| Burst, 20k msgs (2 runs) | HTTP | 39–41 µs | 2.5–3.8 ms | 32–39% | 323–412 msg/s |
+| Burst, 20k msgs (2 runs) | gRPC | 55–57 µs | 0.4–0.5 ms | 55–77% | 653–911 msg/s |
+
+**Conclusions**
+
+- The application thread is never blocked meaningfully: export is asynchronous and the call costs tens of microseconds
+  (worst case ~140 ms outliers under burst, off the request path).
+- Under sustained high rates gRPC keeps up (multiplexed, one connection) where HTTP saturates; when the agent's queue is full
+  it drops logs by design, which is what the "delivered" column reflects. Below ~1,000 msg/s there is no difference.
+- Real throughput is bounded by Presidio (~30 ms per analysis, ~950 MiB RAM), not by the transport, so the stub numbers are an
+  upper bound. For typical services HTTP is the sensible default (4.5 MB JAR, no extra dependencies); choose gRPC for
+  very chatty services.
+- Limits: loopback only (no network latency), a stub analyzer, single run per scenario, one machine. Treat the numbers as
+  relative, not absolute.
 
 ## Kubernetes
 
