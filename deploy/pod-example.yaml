@@ -1,0 +1,18 @@
+# Sidecar pod: app (with the Java agent) + pii-sidecar (Go receiver + Presidio) sharing localhost.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mockjdbc-spring-users
+spec:
+  containers:
+    - name: app
+      image: mockjdbc-spring-users:latest
+      env:
+        - { name: JAVA_TOOL_OPTIONS, value: "-javaagent:/opt/pii/pii-detector-agent.jar" }
+        - { name: OTEL_SERVICE_NAME, value: mockjdbc-spring-users }
+        - { name: PII_SIDECAR_URL, value: "http://localhost:4318/v1/logs" }
+    - name: pii-sidecar
+      image: pii-sidecar:latest
+      ports:
+        - { name: otlp, containerPort: 4318 }
+        - { name: metrics, containerPort: 9464 }
