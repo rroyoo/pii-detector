@@ -7,15 +7,15 @@ counters that carry only the service name and the entity type, never the detecte
 ## How it works
 
 ```
-Java app + agent ──OTLP/HTTP (JSON)──▶ Go sidecar ──HTTP──▶ Presidio Analyzer
+Java app + agent ──OTLP/HTTP (JSON) or OTLP/gRPC──▶ Go sidecar ──HTTP──▶ Presidio Analyzer
                                             │
                                             └──▶ Prometheus metrics (:9464/metrics)
 ```
 
 1. The **agent** hooks Logback inside the JVM, captures each log event (message and structured
-   key-value fields) and sends it asynchronously to the sidecar. It is fail-safe: it never blocks or
+   key-value fields) and sends it asynchronously to the sidecar over OTLP/HTTP or OTLP/gRPC. It is fail-safe: it never blocks or
    breaks the host application.
-2. The **sidecar** receives the logs (`POST /v1/logs`), asks Presidio to analyze the text, and counts
+2. The **sidecar** receives the logs (OTLP/HTTP `POST /v1/logs` on `:4318`, OTLP/gRPC on `:4317`), asks Presidio to analyze the text, and counts
    the findings.
 3. **Presidio Analyzer** detects entities such as `PERSON`, `CREDIT_CARD`, `EMAIL_ADDRESS`,
    `IP_ADDRESS` and the Spanish `ES_NIF` / `ES_NIE`.
@@ -36,7 +36,7 @@ interface, so it can be faked in tests) → `metrics`.
 ## Prerequisites
 
 - JDK 17 or newer and Maven 3.9+ (agent and PoC)
-- Go 1.22 or newer (sidecar)
+- Go 1.26 or newer (sidecar)
 - Docker with Compose v2 (analyzer image and PoC)
 
 ## Building each module
@@ -48,16 +48,32 @@ cd agent
 mvn package
 ```
 
-Produces `agent/target/pii-detector-agent-1.0.0-SNAPSHOT.jar` (Byte Buddy shaded in). Attach it to any
+Produces two alternative agent JARs; pick one so HTTP users do not carry gRPC dependencies:
+
+| JAR | Size | Transports |
+|---|---|---|
+| `agent/http/target/pii-detector-agent-http-1.0.0-SNAPSHOT-agent.jar` | ~4.5 MB | HTTP only |
+| `agent/grpc/target/pii-detector-agent-grpc-1.0.0-SNAPSHOT-agent.jar` | ~20 MB | HTTP and gRPC |
+
+If `PII_EXPORT_PROTOCOL=grpc` is set with the HTTP JAR, the agent warns and falls back to HTTP. Attach one to any
 JVM application that uses Logback:
 
 ```bash
-java -javaagent:/path/to/pii-detector-agent-1.0.0-SNAPSHOT.jar -jar your-app.jar
+java -javaagent:/path/to/pii-detector-agent-http-1.0.0-SNAPSHOT-agent.jar -jar your-app.jar
 ```
+
+In the PoC, `PII_EXPORT_PROTOCOL=grpc docker compose up -d --build` builds the gRPC flavor (`AGENT_FLAVOR` build arg).
+
+Benchmark (loopback, fake Presidio, 20k messages): at 1000 msg/s both deliver 100%; at 5000 msg/s gRPC delivered 100% versus
+~45% for HTTP (the agent drops when the queue is full, by design). Per-call latency is microseconds in both; with real
+Presidio (~30 ms per analysis) the transport is not the bottleneck, so HTTP is the sensible default. Dependency scan (OSV):
+no known vulnerabilities in the agent's 26 artifacts.
 
 | Variable | Default | Description |
 |---|---|---|
-| `PII_SIDECAR_URL` | `http://localhost:4318/v1/logs` | Sidecar OTLP/HTTP endpoint |
+| `PII_EXPORT_PROTOCOL` | `http` | Transport to the sidecar: `http` or `grpc` |
+| `PII_SIDECAR_URL` | `http://localhost:4318/v1/logs` | Sidecar OTLP/HTTP endpoint (protocol `http`) |
+| `PII_SIDECAR_GRPC_ADDR` | `localhost:4317` | Sidecar OTLP/gRPC `host:port`, plaintext (protocol `grpc`) |
 | `OTEL_SERVICE_NAME` | `unknown` | Service name used as the metric label |
 
 ### Sidecar
@@ -74,8 +90,12 @@ docker build -t pii-sidecar .       # distroless image
 | `PRESIDIO_URL` | `http://localhost:3000` | Presidio Analyzer base URL |
 | `PRESIDIO_LANGUAGE` | `en` | Language sent to Presidio (`en`, `es`) |
 | `PRESIDIO_MIN_SCORE` | `0.4` | Minimum confidence (0 to 1); sent as `score_threshold` |
+| `OTLP_PROTOCOLS` | `http,grpc` | Receivers to enable (`http`, `grpc`, or both) |
 | `OTLP_HTTP_ADDR` | `:4318` | OTLP/HTTP listen address |
+| `OTLP_GRPC_ADDR` | `:4317` | OTLP/gRPC listen address |
 | `METRICS_ADDR` | `:9464` | Prometheus metrics listen address |
+
+Presidio is always reached over its REST API; the Analyzer has no gRPC interface.
 
 Metrics exposed at `/metrics`:
 
@@ -137,9 +157,15 @@ Expected entities after both calls include `ES_NIF`, `CREDIT_CARD`, `EMAIL_ADDRE
 `PERSON`. Counters are cumulative and the application's own startup logs are analyzed too, so counts
 can be higher than the number of requests. `docker compose restart sidecar` resets them.
 
+To send the logs over gRPC instead of HTTP:
+
+```bash
+PII_EXPORT_PROTOCOL=grpc docker compose up -d --force-recreate app
+```
+
 Stop everything with `docker compose down`.
 
-Ports are bound to `127.0.0.1`: app `8080`, OTLP `4318`, metrics `9464`. Presidio is not published; to
+Ports are bound to `127.0.0.1`: app `8080`, OTLP/gRPC `4317`, OTLP/HTTP `4318`, metrics `9464`. Presidio is not published; to
 call it directly use the Compose network:
 
 ```bash
@@ -164,8 +190,9 @@ cd agent && mvn test                            # agent build and unit tests
 cd poc && mvn test                              # PoC build and context tests
 ```
 
-Current coverage: the sidecar has unit tests for the Presidio client (`score_threshold` handling). The
-agent and PoC modules compile and run `mvn test`, but contain no test classes yet. The end-to-end flow
+Current coverage: the sidecar tests the Presidio client (`score_threshold`) and both OTLP receivers
+(HTTP and gRPC); the agent tests the protobuf encoding, the gRPC exporter against a local server and
+the protocol selection. The PoC module compiles and runs `mvn test` but has no test classes yet. The end-to-end flow
 is verified manually with the PoC steps above.
 
 To run a single test: `go test ./internal/presidio -run TestName` or
