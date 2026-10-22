@@ -2,19 +2,27 @@
 
 # Copilot instructions
 
-PII/GDPR log analysis. Detection only: never mask, rewrite, or persist log content.
+This repository detects possible PII in application logs for GDPR analysis. It is detection-only: never mask, rewrite, or persist log content.
+
+## Build and test
+
+- Sidecar build and tests: `cd sidecar && go build ./... && go test ./...`
+- One Go test: `cd sidecar && go test ./internal/pipeline -run '^TestName$'`
+- Build the Java agent: `cd agent && mvn package`
+- One Java test: `cd agent && mvn test -Dtest=ClassName#method`
 
 ## Architecture
-App (+ Java agent in `agent/`) → OTLP/HTTP → Go sidecar (`sidecar/`) → Presidio Analyzer (same container) → Prometheus metrics.
-Flow in the sidecar: `internal/otlp` (receiver) → `internal/pipeline` → `internal/presidio` (adapter behind the `Analyzer` interface) → `internal/metrics`.
-Integration target: `../mockjdbc-foundation/mockjdbc-spring-users` (Spring Boot 3.5, Java 17, Maven).
 
-## Commands
-- Sidecar: `cd sidecar && go build ./... && go test ./...`; single test: `go test ./internal/pipeline -run TestName`
-- Agent: `cd agent && mvn package`; single test: `mvn test -Dtest=ClassName#method`
+The intended flow is application → Java instrumentation agent (`agent/`) → OTLP/HTTP JSON → Go sidecar (`sidecar/`) → Presidio Analyzer → Prometheus metrics. The example deployment in `deploy/pod-example.yaml` puts the app and sidecar in one pod and connects them over localhost.
+
+In the sidecar, `cmd/sidecar` wires the components together; `internal/otlp` accepts `POST /v1/logs` and extracts the service name and string log bodies; `internal/pipeline` passes each body to the analyzer and records counts; `internal/presidio` adapts the Presidio `/analyze` API; `internal/metrics` serves `/metrics` on a separate listener. Presidio defaults to `http://localhost:5002`; `PRESIDIO_URL`, `PRESIDIO_LANGUAGE`, `OTLP_HTTP_ADDR`, and `METRICS_ADDR` configure the sidecar. The agent endpoint is configured with `PII_SIDECAR_URL`; service name comes from `otel.service.name`, then `OTEL_SERVICE_NAME`.
+
+The agent entry point and exporter exist, but `LogCapture.install` is currently an empty scaffold, so the logging hook is not implemented yet. The integration target described in `README.md` is `../mockjdbc-foundation/mockjdbc-spring-users` (Spring Boot 3.5, Java 17, Maven).
 
 ## Conventions
-- Metric labels may only be service name and entity type — never PII values or log text.
-- Keep Presidio access behind the `presidio.Analyzer` interface so it can be faked in tests.
-- The agent must be fail-safe: exporting is async and must never break or slow the host application.
-- Sidecar uses the Go standard library only unless a dependency is clearly needed.
+
+- Never mask, rewrite, or persist log text. Keep log content transient through the analysis path.
+- Metric labels may contain only service name and entity type, never PII values or log text.
+- Keep Presidio calls behind the `presidio.Analyzer` interface so pipeline behavior can be tested with a fake.
+- Agent exporting must remain asynchronous and fail-safe; it must not break or slow the host application.
+- The sidecar currently uses only the Go standard library; add dependencies only when clearly needed.
