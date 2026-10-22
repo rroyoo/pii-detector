@@ -1,4 +1,4 @@
-// Package otlp implements a minimal OTLP/HTTP (JSON encoding) logs receiver.
+// Package otlp implements OTLP logs receivers: HTTP (JSON encoding) and gRPC.
 package otlp
 
 import (
